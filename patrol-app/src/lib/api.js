@@ -33,9 +33,11 @@ const MAIL_TEMPLATE = `件名：【商標キーワード除外のお願い】カ
 
 export { KEYWORDS, MAIL_TEMPLATE }
 
+const GEMINI_MODEL = 'gemini-2.0-flash'
+
 export async function analyzeScreenshot(base64Image, hints = {}) {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error('Anthropic APIキーが設定されていません')
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY
+  if (!apiKey) throw new Error('Gemini APIキーが設定されていません')
 
   const prompt = `これはGoogle広告またはYahoo!広告の検索結果スクリーンショットです。
 カーセブン（CarSeven）の商標キーワードを使った競合他社のスポンサー広告が表示されているか確認してください。
@@ -55,41 +57,41 @@ ${hints.advertiser ? `広告主ヒント：${hints.advertiser}` : ''}
 ${hints.url ? `URLヒント：${hints.url}` : ''}
 ${hints.platform ? `媒体：${hints.platform}` : ''}`
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: 'claude-opus-4-6',
-      max_tokens: 1000,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64Image } },
-          { type: 'text', text: prompt }
-        ]
-      }]
-    })
-  })
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: 'image/png', data: base64Image } },
+            { text: prompt }
+          ]
+        }]
+      })
+    }
+  )
 
   if (!res.ok) throw new Error(`API Error: ${res.status}`)
   const data = await res.json()
-  const text = data.content?.map(b => b.text || '').join('') || ''
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
   return JSON.parse(text.replace(/```json|```/g, '').trim())
 }
 
 export async function generateMail(entry) {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error('Anthropic APIキーが設定されていません')
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY
+  if (!apiKey) throw new Error('Gemini APIキーが設定されていません')
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: 'claude-opus-4-6',
-      max_tokens: 1000,
-      messages: [{
-        role: 'user',
-        content: `以下の情報をもとに商標KW除外依頼メールを作成してください。メール本文のみ返してください。
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: `以下の情報をもとに商標KW除外依頼メールを作成してください。メール本文のみ返してください。
 
 テンプレート：
 ${MAIL_TEMPLATE}
@@ -100,13 +102,15 @@ ${MAIL_TEMPLATE}
 - 表示URL：${entry.display_url}
 - 検知日時：${entry.date}
 - 検知KW：${entry.detected_keywords?.join('、') || entry.kw}`
-      }]
-    })
-  })
+          }]
+        }]
+      })
+    }
+  )
 
   if (!res.ok) throw new Error(`API Error: ${res.status}`)
   const data = await res.json()
-  return data.content?.map(b => b.text || '').join('') || ''
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || ''
 }
 
 export async function saveToGAS(entry) {
